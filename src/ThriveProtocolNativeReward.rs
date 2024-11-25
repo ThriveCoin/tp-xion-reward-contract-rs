@@ -1,5 +1,5 @@
 use cosmwasm_std::{
-    entry_point, to_binary, Addr, BankMsg, Binary, Coin, CosmosMsg, Deps, DepsMut, Env, MessageInfo, 
+    entry_point, to_binary, attr, Addr, BankMsg, Binary, Coin, CosmosMsg, Deps, DepsMut, Env, MessageInfo, 
     Response, StdError, StdResult, Uint128
 };
 use cw_storage_plus::{Item, Map};
@@ -148,30 +148,56 @@ pub fn execute_deposit(
         .add_attribute("amount", amount))
 }
 
+fn reward_single(
+    deps: DepsMut,
+    recipient: String,
+    amount: Uint128,
+    reason: String,
+) -> StdResult<()> {
+    let recipient_addr = deps.api.addr_validate(&recipient)?;
+    BALANCES.update(deps.storage, &recipient_addr, |balance: Option<Uint128>| -> StdResult<_> {
+        Ok(balance.unwrap_or_default() + amount)
+    })?;
+    Ok(())
+}
+
+pub fn execute_reward_bulk(
+    mut deps: DepsMut,
+    info: MessageInfo,
+    recipients: Vec<String>,
+    amounts: Vec<Uint128>,
+    reasons: Vec<String>,
+) -> StdResult<Response> {
+    validate_owner(deps.as_ref(), &info)?;
+
+    if recipients.len() != amounts.len() || recipients.len() != reasons.len() {
+        return Err(cosmwasm_std::StdError::generic_err("Array lengths mismatch"));
+    }
+
+    for ((recipient, amount), reason) in recipients.iter().zip(amounts.iter()).zip(reasons.iter()) {
+        reward_single(deps.branch(), recipient.clone(), *amount, reason.clone())?;
+    }
+
+    Ok(Response::new().add_attributes(vec![attr("action", "reward_bulk")]))
+}
+
 pub fn execute_reward(
     deps: DepsMut,
     info: MessageInfo,
     recipient: String,
     amount: Uint128,
-    reason: String
+    reason: String,
 ) -> StdResult<Response> {
     validate_owner(deps.as_ref(), &info)?;
 
-    let recipient_addr = deps.api.addr_validate(&recipient)?;
-    let current_balance = BALANCES
-        .may_load(deps.storage, &recipient_addr)?
-        .unwrap_or(Uint128::zero());
-    BALANCES.save(deps.storage, &recipient_addr, &(current_balance + amount))?;
+    reward_single(deps, recipient.clone(), amount, reason.clone())?;
 
-    Ok(Response::new()
-        .add_attribute("action", "reward")
-        .add_attribute("recipient", recipient_addr.to_string())
-        .add_attribute("amount", amount)
-        .add_attribute("reason", reason)
-        .add_event(cosmwasm_std::Event::new("Reward")
-            .add_attribute("recipient", recipient_addr.to_string())
-            .add_attribute("amount", amount.to_string())
-            .add_attribute("reason", reason)))
+    Ok(Response::new().add_attributes(vec![
+        attr("action", "reward"),
+        attr("recipient", recipient),
+        attr("amount", amount.to_string()),
+        attr("reason", reason),
+    ]))
 }
 
 pub fn execute_withdraw(
