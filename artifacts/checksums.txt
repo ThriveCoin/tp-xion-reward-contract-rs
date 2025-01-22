@@ -1,0 +1,1 @@
+bb2fac1091b93026a0cd57ae40e814a916d9cfc4a7b4f23f1e49a28d7abef286  tp_xion_reward_contract.wasm
